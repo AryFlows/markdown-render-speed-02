@@ -31,7 +31,7 @@ function collectRefs(lines){let refs={},kept=[];for(let i=0;i<lines.length;i++){
 const fence=l=>/^ {0,3}(`{3,}|~{3,})/.exec(l);
 const htmlStart=l=>/^ {0,3}(?:<(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|ol|p|pre|script|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:\s|>|\/)|<!--|<\?|<![A-Z]|<!\[CDATA\[|<\/?(?:script|pre|style|textarea)(?:\s|>))/i.test(l);
 function blocks(input,refsArg){let c=collectRefs(input.split('\n')),refs=Object.assign(refsArg||{},c.refs),lines=c.lines,out='',i=0;
- const marker=s=>{let m=/^( *)([-+*]|([0-9]{1,9})([.)]))(?=$|[ \t])/.exec(s);if(!m)return null;let rest=s.slice(m[0].length), spaces=0;while(rest[spaces]===' ')spaces++;let empty=!rest.trim();if(spaces>=5&&!empty)return null;let width=m[2].length, content=empty?m[1].length+width+(m[3]?1:2):m[1].length+width+(spaces?spaces:1);return {indent:m[1].length,mark:m[2],ordered:!!m[3],number:m[3],content,body:rest.slice(Math.min(spaces,4)),empty}}
+ const marker=s=>{let m=/^( *)([-+*]|([0-9]{1,9})([.)]))(?=$|[ \t])/.exec(s);if(!m)return null;let rest=s.slice(m[0].length),spaces=0;while(rest[spaces]===' ')spaces++;let empty=!rest.trim(),width=m[2].length,content=m[1].length+width+(empty?(m[3]?1:2):spaces>=5?1:spaces?spaces:1);return {indent:m[1].length,mark:m[2],ordered:!!m[3],number:m[3],content,body:rest.slice(empty?rest.length:spaces>=5?1:spaces),empty}}
  function list(first,ordered){let fm=marker(first),base=fm.indent,mark=fm.mark,tag=ordered?'ol':'ul',sn=String(Number(fm.number||1));let items=[],loose=false;
   while(i<lines.length){let m=marker(lines[i]);if(!m||m.indent!==base||m.ordered!==ordered||m.mark!==mark)break;let content=m.content,a=m.empty?[]:[m.body],hadBlank=false;i++;
    while(i<lines.length){let cur=lines[i],n=marker(cur),ind=/^( *)(.*)$/.exec(cur)[1].length;if(n&&n.indent===base&&n.ordered===ordered&&n.mark===mark)break;
@@ -39,10 +39,10 @@ function blocks(input,refsArg){let c=collectRefs(input.split('\n')),refs=Object.
     if(ind>=content){a.push(cur.slice(content));i++;continue}
     if(hadBlank){i--;break}break;
    }
-   items.push({a,blank:hadBlank}); if(hadBlank)loose=true;
+   items.push({a,blank:hadBlank});
   }
   // Blank lines between items make every paragraph in the list loose.
-  if(items.some(x=>x.blank))loose=true;
+  if(items.some((x,n)=>n<items.length-1&&x.blank))loose=true;
   let rendered=[];for(const it of items){let a=it.a;while(a.length&&!a.at(-1).trim())a.pop();let task=a.length&&/^\[([ xX])\] (.*)$/.exec(a[0]);if(task)a[0]=task[2];let inner=blocks(a.join('\n'),refs);if(task){let box='<input '+(/[xX]/.test(task[1])?'checked="" ':'')+'disabled="" type="checkbox"> ';inner=inner.replace(/^<p>/,'<p>'+box);if(!loose)inner=inner.replace(/^<p>([\s\S]*?)<\/p>\n/,'$1')}
    else if(!loose)inner=inner.replace(/^<p>([\s\S]*?)<\/p>\n/,'$1');rendered.push('<li>'+inner+'</li>\n')}
   out+='<'+tag+(ordered&&sn!=='1'?' start="'+sn+'"':'')+'>\n'+rendered.join('')+'</'+tag+'>\n'}
@@ -50,10 +50,6 @@ function blocks(input,refsArg){let c=collectRefs(input.split('\n')),refs=Object.
 export function parse(markdown){
   let src=String(markdown).replace(/\r\n?/g,'\n').replace(/^ {0,3}\t/g,'    ');
   let out=blocks(src,{});
-  for(const m of src.matchAll(/^\s*[-+*]\s+\[([ xX])\]\s+(.*)$/gm)){
-    const body=inline(m[2],{}), box='<input '+(m[1].toLowerCase()==='x'?'checked="" ':'')+'disabled="" type="checkbox"> ';
-    out=out.replace('<li>'+body+'</li>','<li>'+box+body+'</li>');
-  }
   out=out.replace(/(<h[1-6]>[^\n]*?)\s+(<\/h[1-6]>)/g,'$1$2');
   out=out.replace(/(<\/(?:table|div|details|style|script|pre|textarea)> )\n<p>/g,'$1<p>').replace(/(<\/(?:table|div|details|style|script|pre|textarea)>)\n<p>/g,'$1<p>');
   return out;
