@@ -28,13 +28,13 @@ function inline(src,refs){
  return ts.map(render).join('')
 }
 function collectRefs(lines){let refs={},kept=[];for(let i=0;i<lines.length;i++){let m=/^ {0,3}\[([^\]]+)\]:\s*(?:<([^>]+)>|(\S+))(?:\s+(?:"([^"]*)"|'([^']*)'|\(([^)]*)\)))?\s*$/.exec(lines[i]);if(m){let k=m[1].toLowerCase().replace(/\s+/g,' ').trim();if(!(k in refs))refs[k]={url:m[2]??m[3],title:m[4]??m[5]??m[6]}}else kept.push(lines[i])}return{refs,lines:kept}}
-const fence=l=>/^ {0,3}(`{3,}|~{3,})/.exec(l);
+const fence=l=>/^ {0,3}(`{3,}|~{3,})(.*)$/.exec(l);
 const htmlStart=l=>/^ {0,3}(?:<(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|ol|p|pre|script|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:\s|>|\/)|<!--|<\?|<![A-Z]|<!\[CDATA\[|<\/?(?:script|pre|style|textarea)(?:\s|>))/i.test(l);
 function blocks(input,refsArg){let c=collectRefs(input.split('\n')),refs=Object.assign(refsArg||{},c.refs),lines=c.lines,out='',i=0;
  const marker=s=>{let m=/^( *)([-+*]|([0-9]{1,9})([.)]))(?=$|[ \t])/.exec(s);if(!m)return null;let rest=s.slice(m[0].length),spaces=0;while(rest[spaces]===' ')spaces++;let empty=!rest.trim(),width=m[2].length,content=m[1].length+width+(empty?(m[3]?1:2):spaces>=5?1:spaces?spaces:1);return {indent:m[1].length,mark:m[2],ordered:!!m[3],number:m[3],content,body:rest.slice(empty?rest.length:spaces>=5?1:spaces),empty}}
  function list(first,ordered){let fm=marker(first),base=fm.indent,mark=fm.mark,tag=ordered?'ol':'ul',sn=String(Number(fm.number||1));let items=[],loose=false;
-  while(i<lines.length){let m=marker(lines[i]);if(!m||m.indent!==base||m.ordered!==ordered||m.mark!==mark)break;let content=m.content,a=m.empty?[]:[m.body],hadBlank=false;i++;
-   while(i<lines.length){let cur=lines[i],n=marker(cur),ind=/^( *)(.*)$/.exec(cur)[1].length;if(n&&n.indent===base&&n.ordered===ordered&&n.mark===mark)break;
+  while(i<lines.length){let m=marker(lines[i]);if(!m||m.indent!==base||m.ordered!==ordered||(ordered?m.mark.at(-1)!==mark.at(-1):m.mark!==mark))break;let content=m.content,a=m.empty?[]:[m.body],hadBlank=false;i++;
+   while(i<lines.length){let cur=lines[i],n=marker(cur),ind=/^( *)(.*)$/.exec(cur)[1].length;if(n&&n.indent===base&&n.ordered===ordered&&(ordered?n.mark.at(-1)===mark.at(-1):n.mark===mark))break;
     if(!cur.trim()){a.push('');hadBlank=true;i++;continue}
     if(ind>=content){a.push(cur.slice(content));i++;continue}
     if(hadBlank){i--;break}break;
