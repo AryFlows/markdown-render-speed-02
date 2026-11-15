@@ -9,11 +9,26 @@ const normLabel=s=>s.trim().replace(/\s+/g,' ').toLowerCase();
 function scanLabel(s,start){let d=1;for(let p=start;p<s.length;p++){if(s[p]==='\\'){p++;continue}if(s[p]==='`'){let n=1;while(s[p+n]==='`')n++;let re=new RegExp('`{'+n+'}(?!`)','g');re.lastIndex=p+n;let m=re.exec(s);if(m){p=m.index+n-1;continue}}if(s[p]==='[')d++;else if(s[p]===']'&&--d===0)return{end:p,label:s.slice(start,p)}}return null}
 function parseLinkTail(s,p){if(s[p]!=='(')return null;let i=p+1;while(/\s/.test(s[i]||''))i++;let url='';if(s[i]==='<'){let a=++i;for(;i<s.length;i++){if(s[i]==='\\'){i++;continue}if(s[i]==='\n'||s[i]==='<')return null;if(s[i]==='>')break}if(i>=s.length)return null;url=s.slice(a,i++);}else{let a=i,depth=0;for(;i<s.length;i++){let c=s[i];if(c==='\\'){i++;continue}if(/[\x00-\x20]/.test(c))break;if(c==='(')depth++;else if(c===')'){if(!depth)break;depth--}}url=s.slice(a,i);if(!url)return null}while(/\s/.test(s[i]||''))i++;let title='';if(s[i]==='"'||s[i]==="'"||s[i]==='('){let opener=s[i],closer=opener==='('?')':opener,a=++i;for(;i<s.length;i++){if(s[i]==='\\'){i++;continue}if(s[i]===closer)break}if(i>=s.length)return null;title=s.slice(a,i++);if(!/\s/.test(s[i]||''))return null;while(/\s/.test(s[i]||''))i++}if(s[i]!==')')return null;return{end:i+1,url,title}}
 function unesc(s){return s.replace(/\\([!"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~])/g,'$1')}
+function matchAutolink(src,i){
+ const loc="[A-Za-z0-9.!#$%&'*+\\/=?^_`{|}~-]+", lab='[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?', dom=`${lab}(?:\\.${lab})+`;
+ const enc=s=>urlAttr(s).replace(/\\/g,'%5C');
+ const result=(h,t,n)=>({html:`<a href="${enc(h)}">${text(t)}</a>`,len:n});
+ if(src[i]==='<'){let m=/^<([A-Za-z][A-Za-z0-9+.-]{1,31}:[^<>\s\x00-\x1f]*)>/.exec(src.slice(i));if(m)return result(m[1],m[1],m[0].length);m=new RegExp(`^<(${loc}@${lab}(?:\\.${lab})+[A-Za-z])>`).exec(src.slice(i));return m?result('mailto:'+m[1],m[1],m[0].length):null}
+ if(i&& !/[\s(]/.test(src[i-1]))return null;
+ let raw='';const get=(pre)=>{let m=new RegExp(`^${pre}(${lab}(?:\\.${lab})*\\.[A-Za-z]{2,})([^\\s<]*)`,'i').exec(src.slice(i));return m?m[0]:''};
+ if(src.slice(i,i+4).toLowerCase()==='www.')raw=get('www\\.');
+ if(!raw){let m=/^(https?|ftp):\/\//i.exec(src.slice(i));if(m)raw=get(m[0].replace(/[.*+?^${}()|[\]\\]/g,'\\$&'))}
+ if(!raw){let m=new RegExp(`^(${loc}@${lab}(?:\\.${lab})*\\.[A-Za-z]{2,})`).exec(src.slice(i));if(m)raw=m[1]}
+ if(!raw){let m=/^([A-Za-z][A-Za-z0-9+.-]*:[^\s<]*@[^\s<]*)/.exec(src.slice(i));if(m)raw=m[1]}
+ let u=raw;if(!u)return null;while(/[.,;:!?]$/.test(u))u=u.slice(0,-1);while(u.endsWith(')')&&(u.match(/\)/g)||[]).length>(u.match(/\(/g)||[]).length)u=u.slice(0,-1);if(u.endsWith(']')&&!u.includes('['))u=u.slice(0,-1);if(u.endsWith('}')&&!u.includes('{'))u=u.slice(0,-1);if(u.endsWith('"')&&(u.match(/"/g)||[]).length%2)u=u.slice(0,-1);if(u.endsWith("'")&&(u.match(/'/g)||[]).length%2)u=u.slice(0,-1);if(!u)return null;
+ let h=/^www\./i.test(u)?'http://'+u:/^(?:mailto|xmpp):/i.test(u)?u:u.includes('@')&&!/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(u)?'mailto:'+u:u;return result(h,u,u.length)
+}
 function inline(src,refs){
  const ts=[]; let i=0, plain='';
  const flush=()=>{if(plain){ts.push({t:'text',v:plain});plain=''}};
  const atomic=(v,t='html')=>{flush();ts.push({t,v})};
  while(i<src.length){
+  let auto=matchAutolink(src,i);if(auto){atomic(auto.html,src[i]==='<'?'html':'link');i+=auto.len;continue}
   if(src[i]==='\\'){if(src[i+1]==='\n'){if(i+2===src.length)plain+='\\';else{flush();atomic('<br>','br')}i+=2;continue}if(PUNCT.includes(src[i+1]||'')){plain+=esc(src[i+1]);i+=2;continue}plain+=text(src[i++]);continue}
   if(src[i]==='\n'){let k=plain.length;while(k>0&&plain[k-1]===' ')k--;if(plain.length-k>=2){plain=plain.slice(0,k);flush();atomic('<br>','br')}else plain+='\n';i++;continue}
   if(src[i]==='`'){let n=1;while(src[i+n]==='`')n++;let q=-1;for(let z=i+n;z<src.length;){if(src[z]==='`'){let e=z+1;while(src[e]==='`')e++;if(e-z===n){q=z;break}z=e}else z++}if(q>=0){let v=src.slice(i+n,q).replace(/\r\n?|\n/g,' ').replace(/\t/g,' ');if(v[0]===' '&&v.at(-1)===' '&&v.trim())v=v.slice(1,-1);atomic('<code>'+esc(v)+'</code>','code');i=q+n;continue}}
@@ -21,7 +36,7 @@ function inline(src,refs){
   if((src[i]==='!'&&src[i+1]==='[')||src[i]==='['){let image=src[i]==='!',st=i+(image?2:1),lb=scanLabel(src,st);if(lb){let label=lb.label,p=lb.end+1,def=null;if(src[p]==='('){let x=parseLinkTail(src,p);if(x){def={url:unesc(x.url),title:unesc(x.title)};p=x.end}}else if(src[p]==='['){let second=scanLabel(src,p+1);if(second){let key=normLabel(second.label||label);def=refs[key];p=second.end+1}}else def=refs[normLabel(label)];if(def){let v;if(image){let alt=label.replace(/!?(\[[^\]]*\])(?:\([^)]*\)|\[[^\]]*\])?/g,'$1').replace(/[*_~]/g,'').replace(/`([^`]*)`/g,'$1').replace(/`/g,'').replace(/\s+/g,' ').trim();v='<img src="'+urlAttr(def.url)+'" alt="'+attr(alt)+'"'+(def.title?' title="'+attr(def.title)+'"':'')+'>'}else v='<a href="'+urlAttr(def.url)+'"'+(def.title?' title="'+attr(def.title)+'"':'')+'>'+inline(label,refs)+'</a>';atomic(v,'link');i=p;continue}}}
   let am=/^(https?:\/\/[^\s<]+|ftp:\/\/[^\s<]+|www\.[^\s<]+|[A-Za-z0-9.!#$%&'*+\/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/i.exec(src.slice(i));if(am&&(i===0||/[\s(]/.test(src[i-1]))){let u=am[1],tr='';while(/[.,!?;:'\")\]]$/.test(u)){tr=u.slice(-1)+tr;u=u.slice(0,-1)}let email=u.includes('@')&&!/^\w+:\/\//.test(u),h=email?'mailto:'+u:/^www\./i.test(u)?'http://'+u:u;atomic('<a href="'+urlAttr(h)+'">'+text(u)+'</a>'+text(tr),'link');i+=am[1].length;continue}
   if(src[i]==='*'||src[i]==='_'||src[i]==='~'){let ch=src[i],j=i+1;while(src[j]===ch)j++;let n=j-i;if(ch!=='~'||n===2){flush();let B=i?Array.from(src.slice(0,i)).at(-1):' ',A=j<src.length?Array.from(src.slice(j))[0]:' ',ws=c=>/\s/u.test(c),pun=c=>/[\p{P}\p{S}]/u.test(c),lf=!ws(A)&&(!pun(A)||ws(B)||pun(B)),rf=!ws(B)&&(!pun(B)||ws(A)||pun(A));ts.push({t:'delim',ch,n,canOpen:ch==='_'?lf&&(!rf||pun(B)):lf,canClose:ch==='_'?rf&&(!lf||pun(A)):rf});i=j;continue}}
-  let j=i+1;while(j<src.length&&!/[\\`<\[\]!*_~\n&]/.test(src[j]))j++;plain+=text(src.slice(i,j));i=j;
+  let j=i+1;while(j<src.length&&!/[\\`<\[\]!*_~\n&\s(]/.test(src[j]))j++;plain+=text(src.slice(i,j));i=j;
  }
  flush();
  let changed=true, guard=0;
