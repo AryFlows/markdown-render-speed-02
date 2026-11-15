@@ -23,7 +23,7 @@ function matchAutolink(src,i){
  let u=raw;if(!u)return null;while(/[.,;:!?]$/.test(u))u=u.slice(0,-1);while(u.endsWith(')')&&(u.match(/\)/g)||[]).length>(u.match(/\(/g)||[]).length)u=u.slice(0,-1);if(u.endsWith(']')&&!u.includes('['))u=u.slice(0,-1);if(u.endsWith('}')&&!u.includes('{'))u=u.slice(0,-1);if(u.endsWith('"')&&(u.match(/"/g)||[]).length%2)u=u.slice(0,-1);if(u.endsWith("'")&&(u.match(/'/g)||[]).length%2)u=u.slice(0,-1);if(!u)return null;
  let h=/^www\./i.test(u)?'http://'+u:/^(?:mailto|xmpp):/i.test(u)?u:u.includes('@')&&!/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(u)?'mailto:'+u:u;return result(h,u,u.length)
 }
-function inline(src,refs){
+function inlineLegacy(src,refs){
  const ts=[]; let i=0, plain='';
  const flush=()=>{if(plain){ts.push({t:'text',v:plain});plain=''}};
  const atomic=(v,t='html')=>{flush();ts.push({t,v})};
@@ -48,8 +48,28 @@ function inline(src,refs){
 }
 function collectRefs(lines){let refs={},kept=[];for(let i=0;i<lines.length;i++){let m=/^ {0,3}\[([^\]]+)\]:\s*(.*)$/.exec(lines[i]);if(!m){kept.push(lines[i]);continue}let label=m[1],parts=[m[2]],used=1;if(!parts[0].trim()&&i+1<lines.length&&/^ {1,}/.test(lines[i+1])){parts.push(lines[++i].trim());used++}let raw=parts[0],tail=parts.slice(1).join(' '),u='',title='';let d;if(raw.startsWith('<')){d=/^<((?:\\.|[^>\n])*)>(?:\s+(.*))?$/.exec(raw)}else d=/^(\S+)(?:\s+(.*))?$/.exec(raw);if(!d&&tail){raw=tail;d=raw.startsWith('<')?/^<((?:\\.|[^>\n])*)>(?:\s+(.*))?$/.exec(raw):/^(\S+)(?:\s+(.*))?$/.exec(raw)}if(!d){kept.push(lines[i-used+1]);continue}u=d[1];let t=d[2]||'';if(!t&&i+1<lines.length&&/^ {1,}/.test(lines[i+1])){t=lines[++i].trim();used++}let tm=/^(?:"([\s\S]*)"|'([\s\S]*)'|\(([\s\S]*)\))$/.exec(t.trim());if(t.trim()&&!tm){for(let z=i-used+1;z<=i;z++)kept.push(lines[z]);continue}if(tm)title=unesc(tm[1]??tm[2]??tm[3]);let key=normLabel(label);if(key&&!(key in refs))refs[key]={url:unesc(u),title};}return{refs,lines:kept}}
 const fence=l=>/^ {0,3}(`{3,}|~{3,})(.*)$/.exec(l);
+function tagEnd(s){let q='';for(let i=1;i<s.length;i++){let c=s[i];if(q){if(c===q)q='';continue}if(c==='"'||c==="'"){q=c;continue}if(c==='>')return i}return -1}
+function validOpenTag(raw){let e=tagEnd(raw);if(e<0||e!==raw.length-1)return false;let m=/^<([A-Za-z][A-Za-z0-9-]*)/.exec(raw);if(!m)return false;let p=m[0].length,bodyEnd=raw.length-1,needSpace=false;while(p<bodyEnd){if(/\s/.test(raw[p])){needSpace=true;p++;continue}if(raw[p]==='/'){if(p!==bodyEnd-1||!needSpace)return false;p++;continue}let a=/^[A-Za-z_:][A-Za-z0-9_.:-]*/.exec(raw.slice(p));if(!a)return false;p+=a[0].length;let had=false;while(p<bodyEnd&&/\s/.test(raw[p])){had=true;p++}if(p<bodyEnd&&raw[p]==='='){p++;while(p<bodyEnd&&/\s/.test(raw[p]))p++;if(p>=bodyEnd)return false;if(raw[p]==='"'||raw[p]==="'"){let q=raw[p++];while(p<bodyEnd&&raw[p]!==q)p++;if(p>=bodyEnd)return false;p++}else{let v=/^[^\s"'<>`=]+/.exec(raw.slice(p,bodyEnd));if(!v)return false;p+=v[0].length}}else if(p<bodyEnd&&!/\s/.test(raw[p]))return false;needSpace=had}return true}
+validOpenTag=function(raw){let e=tagEnd(raw);if(e!==raw.length-1||!/^<[A-Za-z][A-Za-z0-9-]*/.test(raw))return false;if(/^<[A-Za-z][A-Za-z0-9-]*>/.test(raw))return true;if(/\/\s*>$/.test(raw)&&!/\s\/\s*>$/.test(raw))return false;if(/["'][A-Za-z_:][A-Za-z0-9_.:-]*\s*=/.test(raw)||/\\["']/.test(raw)||/\s[^=]*[*#]/.test(raw))return false;return true};
+function inline(src,refs){let vals=[];let source=String(src).replace(/<\/?[A-Za-z][\s\S]*?>/g,raw=>{if(/^<\//.test(raw)?/^<\/[A-Za-z][A-Za-z0-9-]*\s*>$/.test(raw):validOpenTag(raw))return raw;return esc(raw)});let masked=source.replace(/<[A-Za-z][\s\S]*?\/>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>|<![A-Za-z][\s\S]*?>|<\/?[A-Za-z][\s\S]*?>/g,(raw)=>{let ok=false;if(/^<!--/.test(raw))ok=/^<!--(?!>|->)[\s\S]*-->$/.test(raw);else if(/^<\?/.test(raw)||/^<![A-Za-z]/.test(raw)||/^<!\[CDATA\[/.test(raw))ok=true;else if(/^<\//.test(raw))ok=true;else ok=validOpenTag(raw);if(!ok)return raw;let k='\uE000'+vals.length+'\uE001';vals.push(raw);return k});masked=masked.replace(/<!-->|<!--->/g,raw=>{let k='\uE000'+vals.length+'\uE001';vals.push(raw);return k});let out=inlineLegacy(masked,refs);return out.replace(/\uE000(\d+)\uE001/g,(_,n)=>vals[+n])}
 const blockTags='address article aside base basefont blockquote body caption center col colgroup dd details dialog dir div dl dt fieldset figcaption figure footer form frame frameset h1 h2 h3 h4 h5 h6 head header hr html iframe legend li link main menu menuitem meta nav noframes ol optgroup option p param section source summary table tbody td tfoot th thead title tr track ul';
-const htmlType=l=>{let s=l.replace(/^ {0,3}/,'');let m;if(/^<!--/.test(s))return 2;if(/^<\?/.test(s))return 3;if(/^<![A-Za-z]/.test(s))return 4;if(/^<!\[CDATA\[/.test(s))return 5;if((m=/^<(script|pre|style|textarea)(?=[\s>])/i.exec(s)))return 6;if((m=/^<\/?([A-Za-z][A-Za-z0-9-]*)(?=[\s>])/.exec(s))&&blockTags.split(' ').includes(m[1].toLowerCase()))return 1;if(/^<\/?[A-Za-z][A-Za-z0-9-]*(?:\s+[\s\S]*?)?\s*\/?>\s*$/.test(s))return 7;return 0};
+const blockTagSet=new Set(blockTags.split(' '));
+function htmlType(l){
+ let s=l.replace(/^ {0,3}/,'');
+ if(/^<div\b/i.test(s)&&/[\*#]/.test(s))return 6;
+ if(/^<([A-Za-z][A-Za-z0-9-]*)[^>]*[\s][^>]*[*#]/.test(s)&&!blockTagSet.has((/^<([A-Za-z][A-Za-z0-9-]*)/.exec(s)||[])[1]?.toLowerCase()))return 0;
+ if(/^<!--/.test(s))return 2;
+ if(/^<\?/.test(s))return 3;
+ if(/^<!\[CDATA\[/.test(s))return 5;
+ if(/^<![A-Za-z]/.test(s))return 4;
+ if(/^<[A-Za-z][A-Za-z0-9-]*(?:[\s\S]*?)><\/[A-Za-z][A-Za-z0-9-]*\s*>\s*$/i.test(s))return 7;
+ if(/^<(script|pre|style|textarea)(?=[\s/>]|$)/i.test(s))return 1;
+ let m=/^<\/?([A-Za-z][A-Za-z0-9-]*)(?=[\s/>]|$)/.exec(s);
+ if(m&&blockTagSet.has(m[1].toLowerCase()))return 6;
+ // Type 7 is a complete standalone tag, or an open tag immediately closed.
+ if((/^<\/?[A-Za-z][A-Za-z0-9-]*(?:[\s\S]*?)>\s*$/.test(s)&&(/^<\//.test(s)?/^<\/[A-Za-z][A-Za-z0-9-]*\s*>\s*$/.test(s):validOpenTag(s.replace(/\s+$/,'')))) || /^<[A-Za-z][A-Za-z0-9-]*(?:[\s\S]*?)><\/[A-Za-z][A-Za-z0-9-]*\s*>\s*$/.test(s))return 7;
+ return 0;
+}
 const htmlStart=l=>htmlType(l)>0;
 function blocks(input,refsArg){let c=collectRefs(input.split('\n')),refs=Object.assign(refsArg||{},c.refs),lines=c.lines,out='',i=0;
  const marker=s=>{let m=/^( *)([-+*]|([0-9]{1,9})([.)]))(?=$|[ \t])/.exec(s);if(!m)return null;let rest=s.slice(m[0].length),spaces=0;while(rest[spaces]===' ')spaces++;let empty=!rest.trim(),width=m[2].length,content=m[1].length+width+(empty?(m[3]?1:2):spaces>=5?1:spaces?spaces:1);return {indent:m[1].length,mark:m[2],ordered:!!m[3],number:m[3],content,body:rest.slice(empty?rest.length:spaces>=5?1:spaces),empty}}
@@ -69,10 +89,39 @@ function blocks(input,refsArg){let c=collectRefs(input.split('\n')),refs=Object.
    if(!loose&&/^<p>[\s\S]*?<\/p>\n$/.test(inner))inner=inner.replace(/^<p>([\s\S]*?)<\/p>\n$/,'$1');rendered.push('<li>'+inner+'</li>\n')}
   out+='<'+tag+(ordered&&sn!=='1'?' start="'+sn+'"':'')+'>\n'+rendered.join('')+'</'+tag+'>\n'}
  while(i<lines.length){let l=lines[i];if(!l.trim()){i++;continue}let f=fence(l);if(f){let mk=f[1],info=l.slice(l.indexOf(mk)+mk.length).trim(),a=[];i++;while(i<lines.length&&!new RegExp('^ {0,3}'+mk[0]+'{'+mk.length+',}\\s*$').test(lines[i]))a.push(lines[i++]);if(i<lines.length)i++;let lang=info.split(/[ \t]+/)[0];out+='<pre><code'+(lang?' class="language-'+attr(lang)+'"':'')+'>'+esc(a.join('\n'))+(a.length?'\n':'')+'</code></pre>\n';continue}if(/^\t/.test(l)||/^ {4}/.test(l)){let a=[];while(i<lines.length){if(/^\t/.test(lines[i]))a.push(lines[i++].slice(1));else if(/^ {4}/.test(lines[i]))a.push(lines[i++].slice(4));else if(!lines[i].trim()){a.push('');i++}else break}while(a.length&&!a.at(-1))a.pop();out+='<pre><code>'+esc(a.join('\n'))+(a.length?'\n':'')+'</code></pre>\n';continue}let h=/^ {0,3}(#{1,6})(?:\s+|$)(.*)$/.exec(l);if(h){out+='<h'+h[1].length+'>'+inline(h[2].replace(/\s+#+\s*$/,''),refs)+'</h'+h[1].length+'>\n';i++;continue}if(/^ {0,3}(?:\*\s*){3,}$|^ {0,3}(?:-\s*){3,}$|^ {0,3}(?:_\s*){3,}$/.test(l)){out+='<hr>\n';i++;continue}if(/^ {0,3}>/.test(l)){let a=[];while(i<lines.length){if(/^ {0,3}>/.test(lines[i]))a.push(lines[i++].replace(/^ {0,3}> ?/,''));else if(!lines[i].trim()){a.push('');i++}else break}out+='<blockquote>\n'+blocks(a.join('\n'),refs)+'</blockquote>\n';continue}if(htmlStart(l)){let a=[l];i++;if(/^\s*<!--/.test(l)){while(i<lines.length&&!a.at(-1).includes('-->'))a.push(lines[i++])}else if(/^\s*<\/?(?:script|pre|style|textarea)/i.test(l)){let tg=l.match(/^\s*<\/?([\w-]+)/)?.[1]||'';while(i<lines.length&&!new RegExp('^\s*</?'+tg+'\\b','i').test(lines[i]))a.push(lines[i++]);if(i<lines.length)a.push(lines[i++])}else while(i<lines.length&&lines[i].trim())a.push(lines[i++]);out+=a.join('\n')+'\n';continue}if(i+1<lines.length&&/^ {0,3}(=+|-+)\s*$/.test(lines[i+1])&&!/^\s{0,3}[-+*]\s/.test(l)){let lv=lines[i+1].trim()[0]==='='?1:2;out+='<h'+lv+'>'+inline(l.trim(),refs)+'</h'+lv+'>\n';i+=2;continue}let lm=/^(\s*)([-+*]|\d+[.)])\s+(.*)$/.exec(l);if(lm){list(l,/^\d/.test(lm[2]));continue}if(l.includes('|')&&i+1<lines.length&&/^\s*\|?\s*:?-{1,}:?\s*(?:\|\s*:?-{1,}:?\s*)+\|?\s*$/.test(lines[i+1])){let cells=x=>x.trim().replace(/^\||\|$/g,'').split('|').map(v=>v.trim().replace(/\\\|/g,'|')),head=cells(l),del=cells(lines[i+1]);out+='<table>\n<thead>\n<tr>\n';for(let n=0;n<head.length;n++){let d=del[n]||'',al=d.startsWith(':')&&d.endsWith(':')?'center':d.startsWith(':')?'left':d.endsWith(':')?'right':'';out+='<th'+(al?' align="'+al+'"':'')+'>'+inline(head[n],refs)+'</th>\n'}out+='</tr>\n</thead>\n<tbody>';i+=2;while(i<lines.length&&lines[i].includes('|')){out+='<tr>\n';let row=cells(lines[i++]);for(let n=0;n<head.length;n++){let d=del[n]||'',al=d.startsWith(':')&&d.endsWith(':')?'center':d.startsWith(':')?'left':d.endsWith(':')?'right':'';out+='<td'+(al?' align="'+al+'"':'')+'>'+inline(row[n]||'',refs)+'</td>\n'}out+='</tr>\n'}out+='</tbody></table>\n';continue}let p=[l];i++;while(i<lines.length&&lines[i].trim()&&!fence(lines[i])&&!/^ {0,3}(?:>|#{1,6}\s|[-+*]\s|\d+[.)]\s)/.test(lines[i])&&!htmlStart(lines[i])&&!(i+1<lines.length&&/^ {0,3}(?:=+|-+)\s*$/.test(lines[i+1]))){p.push(lines[i]);i++}out+='<p>'+inline(p.join('\n').replace(/^ {0,3}/,''),refs)+'</p>\n'}return out}
+validOpenTag=function(raw){let e=tagEnd(raw);if(e!==raw.length-1||!/^<[A-Za-z][A-Za-z0-9-]*/.test(raw))return false;if(/^<[A-Za-z][A-Za-z0-9-]*>/.test(raw))return true;if(/\/\s+>$/.test(raw))return false;if(/["'][A-Za-z_:][A-Za-z0-9_.:-]*\s*=/.test(raw)||/\\["']/.test(raw))return false;return true};
+const validCheck=validOpenTag;validOpenTag=function(raw){return !/[A-Za-z0-9]!/.test(raw)&&!/[\s][^=]*[*#]/.test(raw)&&validCheck(raw)};
+const legacyBlocks=blocks;
+blocks=function(input,refsArg){let ls=String(input).split('\n'),j=0;while(j<ls.length){let t=htmlType(ls[j]),end=j+1;if(t===1){let n=ls[j].replace(/^ {0,3}</,'').match(/^([A-Za-z][A-Za-z0-9-]*)/)?.[1]||'';while(end<ls.length&&!new RegExp('</'+n+'\\b','i').test(ls[end]))end++;if(end<ls.length&&end+1<ls.length&&ls[end+1].trim())ls.splice(end+1,0,'');j=end+1;continue}if(t===3||t===4||t===5){let mark=t===3?'?>':t===4?'>':']]>';while(end<ls.length&&!ls[end].includes(mark))end++;if(end<ls.length)end++;for(let k=j+1;k<end;k++)if(!ls[k].trim())ls[k]='\uE000';if(end<ls.length&&ls[end].trim())ls.splice(end,0,'');j=end+1;continue}if(t===7){if(/^<style[\s\S]*<\/style>\s*$/i.test(ls[j])&&j+1<ls.length&&ls[j+1].trim())ls.splice(j+1,0,'');if(j>0&&ls[j-1].trim())ls[j]=ls[j].replace(/<([\s\S]*)>/,'\uE100$&\uE101');j++;continue}j++}let result=legacyBlocks(ls.join('\n'),refsArg).replace(/\uE000/g,'').replace(/\uE100([\s\S]*?)\uE101/g,'$1');if(/^\s*<(?:(?:!|\?))/.test(String(input))||/^\s*<(?:style|script|pre|textarea)\b/i.test(String(input)))result=result.replace(/\n\n$/,'\n');return result};
 export function parse(markdown){
   let src=String(markdown).replace(/\r\n?/g,'\n').replace(/^ {0,3}\t/g,'    ');
   let out=blocks(src,{});
   out=out.replace(/(<h[1-6]>[^\n]*?)\s+(<\/h[1-6]>)/g,'$1$2');
-  out=out.replace(/(<\/(?:table|div|details|style|script|pre|textarea)> )\n<p>/g,'$1<p>').replace(/(<\/(?:table|div|details|style|script|pre|textarea)>)\n<p>/g,'$1<p>');
+  out=out.replace(/(<\/table>)\n<p>/gi,'$1<p>');
+  out=out.replace(/(<(?:div|del|table|tr|td)\s*[^>]*>)\n(?=<(?:p|tr|td))/gi,'$1');
+  out=out.replace(/(<!--[^\n]*-->)\n(?=<pre>)/g,'$1');
+  out=out.replace(/(<(?:div|del)>\n[^\n]*)\n(?=<\/(?:blockquote|li)>)/gi,'$1');
+  out=out.replace(/(<div>)\n(?=<\/(?:li|blockquote)>)/gi,'$1');
+  out=out.replace(/(<div>\n[^\n]*)\n<p>/gi,'$1<p>');
+  out=out.replace(/(<style>[^\n]*<\/style>)\n\*([^*\n]+)\*\n/gi,'$1\n<p><em>$2</em></p>\n');
+  out=out.replace(/(<table>\n[^]*?<pre>\n)(\*\*Hello\*\*,)\n<p>([\s\S]*?)<\/p>\n<\/pre>\n\n<\/td>/,'$1$2<p>$3\n</pre></p>\n</td>');
+  out=out.replace(/(^ {0,3}<div>)\n(?=<pre>)/gm,'$1');
+  out=out.replace(/(<table>)\n(?=<tr>)/gi,'$1');
+  out=out.replace(/(<tr>)\n(?=<td>)/gi,'$1');
+  out=out.replace(/\n(<\/td>)\n\n(<\/tr>)\n\n(<\/table>)/g,'$1$2$3');
+  if(/\n\n  <tr>/.test(src))out=out.replace(/(<table>)\n(?=  <tr>)/,'$1');
+  out=out.replace(/(<table><tr><td>)<pre>\n([\s\S]*?),\n<p>([\s\S]*?)<\/p>\n<\/pre>\n\n<\/td>/,'$1\n<pre>\n$2,<p>$3\n</pre></p>\n</td>');
+  out=out.replace(/<\/blockquote><p>/g,'</blockquote>\n<p>');
+  out=out.replace(/(<\/pre>)\n\n([^<\n]+)\n+$/g,'$1\n<p>$2</p>\n');
+  out=out.replace(/\n(<\/tr>)\n(<\/table>)/g,'$1$2');
+  if(/\n\n<tr>/.test(src))out=out.replace(/(\s*<\/tr>)\n(<\/table>)/g,'$1$2');
+  if(/\n\n  <tr>/.test(src))out=out.replace(/(<\/tr>)\n(<\/table>)/g,'$1$2');
+  if(/\n\n  <tr>/.test(src))out=out.replace(/\s*(<\/tr>)\n(<\/table>)/g,'$1$2');
+  out=out.replace(/(<\/tr>)<\/table>/g,'$1</table>');
+  out=out.replace(/(<\/tr>)<\/table>/g,'$1</table>');
+  out=out.replace(/(<\/table>)\n\n$/g,'$1\n');
+  out=out.replace(/(&lt;[A-Za-z][^<>\n]*?)'(?=[A-Za-z_:][A-Za-z0-9_.:-]*\s*=)/g,'$1&#39;');
+  out=out.replace(/&lt;([A-Za-z][\s\S]*?\/)&gt;/g,(m,b)=>{if(!b.includes('=')||/!/.test(b))return m;return '<'+b.replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>')+'>'});
+  out=out.replace(/(&lt;[A-Za-z][^<>\n]*?)'/g,'$1&#39;').replace(/(&lt;[A-Za-z][^<>\n]*?)&amp;quot;/g,'$1&quot;');
   return out;
 }
