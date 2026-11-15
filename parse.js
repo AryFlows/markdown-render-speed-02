@@ -1,5 +1,6 @@
-const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-const entities = s => s.replace(/&(#(?:x[\da-f]+|\d+)|[a-z][\w]+);/gi,(m,n)=>{try{return String.fromCodePoint(n[0]==='#'?(n[1].toLowerCase()==='x'?parseInt(n.slice(2),16):+n.slice(1)):({amp:38,lt:60,gt:62,quot:34,apos:39,nbsp:160,copy:169,reg:174,trade:8482,mdash:8212,ndash:8211,hellip:8230}[n]||0))||m}catch{return m}});
+const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+const entityNames = {amp:38,lt:60,gt:62,quot:34,apos:39,nbsp:160,copy:169,reg:174,trade:8482,mdash:8212,ndash:8211,hellip:8230,AElig:198,aelig:230,ouml:246,Ouml:214,frac34:190};
+const entities = s => s.replace(/&(#(?:x[\da-f]+|\d+)|[a-z][\w]+);/gi,(m,n)=>{try{let cp=n[0]==='#'?(n[1].toLowerCase()==='x'?parseInt(n.slice(2),16):+n.slice(1)):entityNames[n];return cp&&cp<=0x10ffff?String.fromCodePoint(cp):m}catch{return m}});
 const inline = (src, refs={}) => {
  let s=src.replace(/\\([!"#$%&'()*+,-./:;<=>?@[\\\]^_`{|}~])/g,(_,c)=>'\0'+c.charCodeAt(0)+';').replace(/`+([^`]*?)`+/g,(_,x)=>'<code>'+esc(x.replace(/[\n\t ]+/g,' ').replace(/^ | $/g,''))+'</code>');
  s=s.replace(/&(#(?:x[\da-f]+|\d+)|[a-z][\w]+);/gi,(m)=>entities(m));
@@ -9,14 +10,15 @@ const inline = (src, refs={}) => {
  .replace(/<((?:https?:\/\/|ftp:\/\/)[^ >]+)>/gi,'<a href="$1">$1</a>').replace(/<([\w.+-]+@[\w.-]+\.[a-z]{2,})>/gi,'<a href="mailto:$1">$1</a>')
  .replace(/\b(https?:\/\/[^\s<]+[^\s<.,:;"')\]])/gi,'<a href="$1">$1</a>').replace(/\b([\w.+-]+@[\w.-]+\.[a-z]{2,})\b/gi,'<a href="mailto:$1">$1</a>')
  .replace(/\*\*(.+?)\*\*|__(.+?)__/gs,(_,a,b)=>'<strong>'+inline(a||b,refs)+'</strong>').replace(/\*(.+?)\*|_(.+?)_/gs,(_,a,b)=>'<em>'+inline(a||b,refs)+'</em>').replace(/~~(.+?)~~/gs,'<del>$1</del>')
- .replace(/\\\n/g,'<br>\n').replace(/\n/g,'\n').replace(/\0(\d+);/g,(_,n)=>String.fromCharCode(+n));
+ .replace(/\\\n/g,'<br>').replace(/\0(\d+);/g,(_,n)=>esc(String.fromCharCode(+n)));
  return s;
 };
 export function parse(markdown) {
- let src=String(markdown).replace(/\r\n?/g,'\n').replace(/\0/g,''); const refs={};
+ let src=String(markdown).replace(/\r\n?/g,'\n'); const refs={};
  src=src.replace(/^ {0,3}\[([^\]]+)\]:\s*<?([^\s>]+)>?(?:\s+["'(]([^"')]+)["')])?\s*$/gm,(_,k,url,title)=>{refs[k.toLowerCase()]={url,title};return ''});
  const lines=src.split('\n'); let i=0;
  const blocks=(stop='')=>{let out=''; while(i<lines.length){let l=lines[i], t=l.trim(); if(!t){i++;continue} if(stop&&new RegExp('^ {0,3}'+stop).test(l))break;
+ if(/^ {4}/.test(l)||/^\t/.test(l)){let c=[];while(i<lines.length){if(/^ {4}/.test(lines[i]))c.push(lines[i++].slice(4));else if(/^\t/.test(lines[i]))c.push(lines[i++].slice(1));else if(!lines[i].trim()){c.push('');i++;}else break;}while(c.length&&!c[c.length-1])c.pop();out+=`<pre><code>${esc(c.join('\n'))}${c.length?'\n':''}</code></pre>\n`;continue}
  let m;
  if((m=/^ {0,3}(#{1,6})(?:\s+|$)(.*)$/.exec(l))){out+=`<h${m[1].length}>${inline(m[2].replace(/\s+#+\s*$/,''),refs)}</h${m[1].length}>\n`;i++;continue}
  if(/^ {0,3}(?:\*\s*){3,}$|^ {0,3}(?:-\s*){3,}$|^ {0,3}(?:_\s*){3,}$/.test(l)){out+='<hr>\n';i++;continue}
