@@ -88,11 +88,12 @@ function parseLinkTail(s, p) {
     const start = ++i;
     for (; i < s.length; i++) {
       if (s[i] === '\\') { i++; continue; }
-      if (s[i] === '\n' || s[i] === '<') return null;
+      if (s[i] === '\n') return null;
       if (s[i] === '>') break;
     }
     if (i >= s.length) return null;
     url = s.slice(start, i++);
+    if (s[i] !== ')' && !/\s/.test(s[i] || '')) return null;
   } else {
     const start = i;
     let depth = 0;
@@ -177,7 +178,7 @@ function matchAutolink(src, i) {
 }
 
 // Tokenize inline markdown and resolve emphasis delimiters.
-function inlineLegacy(src, refs) {
+function inlineLegacy(src, refs, codeValues = []) {
   const tokens = [];
   let i = 0;
   let plain = '';
@@ -334,7 +335,7 @@ function inlineLegacy(src, refs) {
       const start = i + (image ? 2 : 1);
       const labelMatch = scanLabel(src, start);
       if (labelMatch) {
-        const label = labelMatch.label;
+        const label = labelMatch.label.replace(/\uE100(\d+)\uE101/g, (_, n) => codeValues[+n] || '');
         let p = labelMatch.end + 1;
         let definition = null;
         if (src[p] === '(') {
@@ -455,11 +456,18 @@ function collectRefs(lines) {
   const refs = {};
   const kept = [];
   for (let i = 0; i < lines.length; i++) {
-    const match = /^ {0,3}\[([^\]]+)\]:\s*(.*)$/.exec(lines[i]);
+    let match = /^ {0,3}\[([^\]]+)\]:\s*(.*)$/.exec(lines[i]);
+    let multiline = false;
+    if (!match && i + 1 < lines.length) {
+      const multi = /^ {0,3}\[([^\]\n]+)\n {1,}([^\]]+)\]:\s*(.*)$/.exec(lines[i] + '\n' + lines[i + 1]);
+      if (multi) { match = [multi[0], multi[1] + ' ' + multi[2], multi[3]]; multiline = true; }
+    }
     if (!match) { kept.push(lines[i]); continue; }
     const label = match[1];
+    if (/(^|[^\\])(?:\\\\)*\[/.test(label)) { kept.push(lines[i]); continue; }
     const parts = [match[2]];
-    let used = 1;
+    let used = multiline ? 2 : 1;
+    if (multiline) i++;
     if (!parts[0].trim() && i + 1 < lines.length && /^ {1,}/.test(lines[i + 1])) { parts.push(lines[++i].trim()); used++; }
     let raw = parts[0];
     const tail = parts.slice(1).join(' ');
@@ -480,7 +488,7 @@ function collectRefs(lines) {
       continue;
     }
     const title = titleMatch ? unesc(titleMatch[1] ?? titleMatch[2] ?? titleMatch[3]) : '';
-    const key = normLabel(label);
+    const key = normLabel(unesc(label));
     if (key && !(key in refs)) refs[key] = { url: unesc(url), title };
   }
   return { refs, lines: kept };
@@ -516,6 +524,7 @@ function inline(src, refs) {
   const values = [];
   let source = String(src).replace(/<\/?[A-Za-z][\s\S]*?>/g, (raw, offset, whole) => {
     if (offset > 0 && whole[offset - 1] === '\\') return raw;
+    if (/\]\(\s*$/.test(whole.slice(0, offset))) return raw;
     if (/^<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^<>\s\x00-\x1f]*>$/.test(raw) || /^<[A-Za-z0-9.!#$%&'*+\/?=^_`{|}~-]+@[A-Za-z0-9.-]+>$/.test(raw)) return raw;
     if (/^<\//.test(raw) ? /^<\/[A-Za-z][A-Za-z0-9-]*\s*>$/.test(raw) : validOpenTag(raw)) return raw;
     return esc(raw);
@@ -545,6 +554,7 @@ function inline(src, refs) {
   source = codeProtected;
   let masked = source.replace(/<[A-Za-z][\s\S]*?\/>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>|<![A-Za-z][\s\S]*?>|<\/?[A-Za-z][\s\S]*?>/g, (raw, offset, whole) => {
     if (offset > 0 && whole[offset - 1] === '\\') return raw;
+    if (/\]\(\s*$/.test(whole.slice(0, offset))) return raw;
     let valid = false;
     if (/^<!--/.test(raw)) valid = /^<!--(?!>|->)[\s\S]*-->$/.test(raw);
     else if (/^<\?/.test(raw) || /^<![A-Za-z]/.test(raw) || /^<!\[CDATA\[/.test(raw)) valid = true;
@@ -560,7 +570,7 @@ function inline(src, refs) {
     values.push(raw);
     return key;
   });
-  const output = inlineLegacy(masked, refs);
+  const output = inlineLegacy(masked, refs, codeValues);
   return output.replace(/\uE000(\d+)\uE001/g, (_, n) => values[+n]).replace(/\uE100(\d+)\uE101/g, (_, n) => codeValues[+n]);
 }
 
