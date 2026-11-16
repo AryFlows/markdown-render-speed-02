@@ -10,18 +10,23 @@ function scanLabel(s,start){let d=1;for(let p=start;p<s.length;p++){if(s[p]==='\
 function parseLinkTail(s,p){if(s[p]!=='(')return null;let i=p+1;while(/\s/.test(s[i]||''))i++;let url='';if(s[i]==='<'){let a=++i;for(;i<s.length;i++){if(s[i]==='\\'){i++;continue}if(s[i]==='\n'||s[i]==='<')return null;if(s[i]==='>')break}if(i>=s.length)return null;url=s.slice(a,i++);}else{let a=i,depth=0;for(;i<s.length;i++){let c=s[i];if(c==='\\'){i++;continue}if(/[\x00-\x20]/.test(c))break;if(c==='(')depth++;else if(c===')'){if(!depth)break;depth--}}url=s.slice(a,i)}let spaced=false;while(/\s/.test(s[i]||'')){spaced=true;i++}let title='';if(s[i]==='"'||s[i]==="'"||s[i]==='('){if(!spaced)return null;let opener=s[i],closer=opener==='('?')':opener,a=++i;for(;i<s.length;i++){if(s[i]==='\\'){i++;continue}if(s[i]===closer)break}if(i>=s.length)return null;title=s.slice(a,i++).replace(/\\(["'()\\])/g,'$1');while(/\s/.test(s[i]||''))i++}if(s[i]!==')')return null;return{end:i+1,url,title}}
 function unesc(s){return s.replace(/\\([!"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~])/g,'$1')}
 function matchAutolink(src,i){
- const loc="[A-Za-z0-9.!#$%&'*+\\/=?^_`{|}~-]+", lab='[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?', dom=`${lab}(?:\\.${lab})+`;
- const enc=s=>urlAttr(s).replace(/\\/g,'%5C');
- const result=(h,t,n)=>({html:`<a href="${enc(h)}">${text(t)}</a>`,len:n});
- if(src[i]==='<'){let m=/^<([A-Za-z][A-Za-z0-9+.-]{1,31}:[^<>\s\x00-\x1f]*)>/.exec(src.slice(i));if(m)return result(m[1],m[1],m[0].length);m=new RegExp(`^<(${loc}@${lab}(?:\\.${lab})+[A-Za-z])>`).exec(src.slice(i));return m?result('mailto:'+m[1],m[1],m[0].length):null}
- if(i&& !/[\s(]/.test(src[i-1]))return null;
- let raw='';const get=(pre)=>{let m=new RegExp(`^${pre}(${lab}(?:\\.${lab})*\\.[A-Za-z]{2,})([^\\s<]*)`,'i').exec(src.slice(i));return m?m[0]:''};
- if(src.slice(i,i+4).toLowerCase()==='www.')raw=get('www\\.');
- if(!raw){let m=/^(https?|ftp):\/\//i.exec(src.slice(i));if(m)raw=get(m[0].replace(/[.*+?^${}()|[\]\\]/g,'\\$&'))}
- if(!raw){let m=new RegExp(`^(${loc}@${lab}(?:\\.${lab})*\\.[A-Za-z]{2,})`).exec(src.slice(i));if(m)raw=m[1]}
- if(!raw){let m=/^([A-Za-z][A-Za-z0-9+.-]*:[^\s<]*@[^\s<]*)/.exec(src.slice(i));if(m)raw=m[1]}
- let u=raw;if(!u)return null;while(/[.,;:!?]$/.test(u))u=u.slice(0,-1);while(u.endsWith(')')&&(u.match(/\)/g)||[]).length>(u.match(/\(/g)||[]).length)u=u.slice(0,-1);if(u.endsWith(']')&&!u.includes('['))u=u.slice(0,-1);if(u.endsWith('}')&&!u.includes('{'))u=u.slice(0,-1);if(u.endsWith('"')&&(u.match(/"/g)||[]).length%2)u=u.slice(0,-1);if(u.endsWith("'")&&(u.match(/'/g)||[]).length%2)u=u.slice(0,-1);if(!u)return null;
- let h=/^www\./i.test(u)?'http://'+u:/^(?:mailto|xmpp):/i.test(u)?u:u.includes('@')&&!/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(u)?'mailto:'+u:u;return result(h,u,u.length)
+ const enc=s=>urlAttr(s).replace(/\\/g,'%5C'), result=(h,t,n)=>({html:`<a href="${enc(h)}">${text(t)}</a>`,len:n});
+ const email=e=>{let p=e.lastIndexOf('@'),d=e.slice(p+1);return p>0&&/^[A-Za-z0-9.!#$%&'*+\/=?^_`{|}~-]+$/.test(e.slice(0,p))&&/^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(d)&&!/[\-_]$/.test(d)};
+ if(src[i]==='<'){
+  let m=/^<([A-Za-z][A-Za-z0-9+.-]{1,31}:[^<>\s\x00-\x20]*)>/.exec(src.slice(i));
+  if(m)return result(m[1],m[1],m[0].length);
+  m=/^<([A-Za-z0-9.!#$%&'*+\/=?^_`{|}~-]+@[A-Za-z0-9.-]+)>/.exec(src.slice(i));
+  if(m&&email(m[1]))return result('mailto:'+m[1],m[1],m[0].length);
+ }
+ if(i&&!/[\s(*_~.]/.test(src[i-1]))return null;
+ let raw='',tail=/^(?:www\.[^\s<]*|(?:https?|ftp):\/\/[^\s<]*)/i.exec(src.slice(i));
+ if(tail){raw=tail[0].replace(/&[A-Za-z0-9]+;$/,'');while(/[.,;:!?]$/.test(raw))raw=raw.slice(0,-1);while(raw.endsWith(')')&&(raw.match(/\)/g)||[]).length>(raw.match(/\(/g)||[]).length)raw=raw.slice(0,-1);if(raw.endsWith(']')&&!raw.includes('['))raw=raw.slice(0,-1);if(raw.endsWith('}')&&!raw.includes('{'))raw=raw.slice(0,-1)}
+ if(!raw){let m=/^[A-Za-z0-9.!#$%&'*+\/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/.exec(src.slice(i));if(m&&email(m[0]))raw=m[0]}
+ if(!raw){let m=/^[A-Za-z][A-Za-z0-9+.-]*:[^\s<]*/.exec(src.slice(i));if(m){let [scheme,rest]=m[0].split(/:(.*)/s).slice(0,2);if(/^mailto$/i.test(scheme)){let e=(rest.match(/^[^/]+/)||[])[0]||'';e=e.replace(/\.$/,'');if(email(e))raw=scheme+':'+e}else if(!/^(https?|ftp)$/i.test(scheme)){let e=(rest.match(/^[^/]+@[^/]+(?:\.[^/]+)+(?:\/[^/\s<]*)?/)||[])[0];if(e)raw=scheme+':'+e}}
+ }
+ if(!raw)return null;
+ let h=/^www\./i.test(raw)?'http://'+raw:/^mailto:/i.test(raw)||raw.includes('@')&&!/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(raw)?(raw.includes(':')?raw:'mailto:'+raw):raw;
+ return result(h,raw,raw.length)
 }
 function inlineLegacy(src,refs){
  const ts=[]; let i=0, plain='';
