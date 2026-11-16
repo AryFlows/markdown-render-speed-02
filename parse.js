@@ -406,6 +406,9 @@ function inlineLegacy(src, refs, codeValues = []) {
         i = end;
         continue;
       }
+      plain += src.slice(i, end);
+      i = end;
+      continue;
     }
     let end = i + 1;
     while (end < src.length && !/[\\`<\[\]!*_~\n&\s(]/.test(src[end])) end++;
@@ -537,6 +540,9 @@ function inline(src, refs) {
   let codeProtected = '';
   for (let i = 0; i < source.length;) {
     if (source[i] !== '`') { codeProtected += source[i++]; continue; }
+    let backslashes = 0;
+    for (let p = i - 1; p >= 0 && source[p] === '\\'; p--) backslashes++;
+    if (backslashes % 2 === 1) { codeProtected += source[i++]; continue; }
     let endRun = i + 1;
     while (source[endRun] === '`') endRun++;
     const count = endRun - i;
