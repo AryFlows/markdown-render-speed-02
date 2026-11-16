@@ -778,7 +778,7 @@ function blocks(input, refsArg) {
     while (rest[spaces] === ' ') spaces++;
     const empty = !rest.trim();
     const width = match[2].length;
-    const content = match[1].length + width + (empty ? (match[3] ? 1 : 2) : spaces >= 5 ? 1 : spaces ? spaces : 1);
+    const content = empty ? match[1].length + width + 1 : match[1].length + width + (spaces >= 5 ? 1 : spaces ? spaces : 1);
     return { indent: match[1].length, mark: match[2], ordered: !!match[3], number: match[3], content, body: rest.slice(empty ? rest.length : spaces >= 5 ? 1 : spaces), empty };
   };
 
@@ -911,7 +911,7 @@ function blocks(input, refsArg) {
       i += 2;
       continue;
     }
-    const listMatch = /^(\s*)([-+*]|\d+[.)])\s+(.*)$/.exec(line);
+    const listMatch = /^( *)([-+*]|\d+[.)])(?:[ \t]+.*|$)/.exec(line);
     if (listMatch) { list(line, /^\d/.test(listMatch[2])); continue; }
     if (line.includes('|') && i + 1 < lines.length && /^\s*\|?\s*:?-{1,}:?\s*(?:\|\s*:?-{1,}:?\s*)+\|?\s*$/.test(lines[i + 1])) {
       const cells = value => value.trim().replace(/^\||\|$/g, '').split('|').map(cell => cell.trim().replace(/\\\|/g, '|'));
@@ -943,7 +943,7 @@ function blocks(input, refsArg) {
     while (i < lines.length && lines[i].trim() && !fence(lines[i]) && !/^ {0,3}(?:>|#{1,6}\s|[-+*]\s|\d+[.)]\s)/.test(lines[i]) && !htmlStart(lines[i]) && !(i + 1 < lines.length && /^ {0,3}(?:=+|-+)\s*$/.test(lines[i + 1]))) {
       paragraph.push(lines[i++]);
     }
-    output += '<p>' + inline(paragraph.join('\n').replace(/^ {0,3}/, ''), refs) + '</p>\n';
+    output += '<p>' + inline(paragraph.join('\n'), refs) + '</p>\n';
   }
   return output;
 }
