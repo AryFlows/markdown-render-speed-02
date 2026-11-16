@@ -829,10 +829,10 @@ function blocks(input, refsArg) {
     return { indent: match[1].length, mark: match[2], ordered: !!match[3], number: match[3], content, body: rest.slice(empty ? rest.length : spaces >= 5 ? 1 : spaces), empty };
   };
   const interruptsParagraph = (source, hasParagraph = true) => {
+    const listMarker = marker(source);
     return !!fence(source) || /^ {0,3}#{1,6}(?:\s|$)/.test(source) ||
       /^ {0,3}(?:\*\s*){3,}$|^ {0,3}(?:-\s*){3,}$|^ {0,3}(?:_\s*){3,}$/.test(source) ||
-      htmlStart(source) || !!marker(source) ||
-      (hasParagraph && /^ {0,3}(?:=+|-+)\s*$/.test(source));
+      htmlStart(source) || !!listMarker && (!listMarker.ordered || Number(listMarker.number) === 1);
   };
 
   // Parse a contiguous list.
@@ -851,7 +851,7 @@ function blocks(input, refsArg) {
     let loose = false;
     while (i < lines.length) {
       const itemMarker = marker(lines[i]);
-      if (!itemMarker || itemMarker.indent > base || itemMarker.ordered !== ordered || (ordered ? itemMarker.mark.at(-1) !== mark.at(-1) : itemMarker.mark !== mark)) break;
+      if (!itemMarker || itemMarker.indent > base + 3 || itemMarker.ordered !== ordered || (ordered ? itemMarker.mark.at(-1) !== mark.at(-1) : itemMarker.mark !== mark)) break;
       const content = itemMarker.content;
       const itemLines = itemMarker.empty ? [] : [itemMarker.body];
       let hadBlank = false;
@@ -860,7 +860,7 @@ function blocks(input, refsArg) {
         const current = lines[i];
         const nextMarker = marker(current);
         const indent = /^( *)(.*)$/.exec(current)[1].length;
-        if (nextMarker && nextMarker.indent === base && nextMarker.ordered === ordered && (ordered ? nextMarker.mark.at(-1) === mark.at(-1) : nextMarker.mark === mark)) break;
+        if (nextMarker && nextMarker.indent <= base + 3 && nextMarker.indent < content) break;
         if (!current.trim()) { itemLines.push(''); hadBlank = true; i++; continue; }
         if (indent >= content) { itemLines.push(current.slice(content)); i++; continue; }
         if (hadBlank) { i--; break; }
@@ -961,13 +961,7 @@ function blocks(input, refsArg) {
       } else {
         while (i < lines.length && lines[i].trim()) body.push(lines[i++]);
       }
-      output += body.join('\n') + '\n';
-      continue;
-    }
-    if (i + 1 < lines.length && /^ {0,3}(=+|-+)\s*$/.test(lines[i + 1]) && !/^\s{0,3}[-+*]\s/.test(line)) {
-      const level = lines[i + 1].trim()[0] === '=' ? 1 : 2;
-      output += '<h' + level + '>' + inline(line.trim(), refs) + '</h' + level + '>\n';
-      i += 2;
+      output += body.join('\n') + (/^\s*<!--[^\n]*-->\s*$/.test(line) ? '' : '\n');
       continue;
     }
     const listMatch = /^( *)([-+*]|\d+[.)])(?:[ \t]+.*|$)/.exec(line);
@@ -1022,8 +1016,14 @@ function blocks(input, refsArg) {
     }
     const paragraph = [line];
     i++;
-    while (i < lines.length && lines[i].trim() && !/^ {0,3}>/.test(lines[i]) && !interruptsParagraph(lines[i]) && !(i + 1 < lines.length && /^ {0,3}(?:=+|-+)\s*$/.test(lines[i + 1]))) {
+    while (i < lines.length && lines[i].trim() && !/^ {0,3}>/.test(lines[i]) && !interruptsParagraph(lines[i]) && !/^ {0,3}(?:=+|-+)\s*$/.test(lines[i])) {
       paragraph.push(lines[i++]);
+    }
+    if (i < lines.length && /^ {0,3}(=+|-+)\s*$/.test(lines[i])) {
+      const level = lines[i].trim()[0] === '=' ? 1 : 2;
+      output += '<h' + level + '>' + inline(paragraph.join('\n').trim(), refs) + '</h' + level + '>\n';
+      i++;
+      continue;
     }
     output += '<p>' + inline(paragraph.join('\n'), refs) + '</p>\n';
   }
