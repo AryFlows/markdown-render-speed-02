@@ -92,10 +92,26 @@ function blocks(input,refsArg){let c=collectRefs(input.split('\n')),refs=Object.
 validOpenTag=function(raw){let e=tagEnd(raw);if(e!==raw.length-1||!/^<[A-Za-z][A-Za-z0-9-]*/.test(raw))return false;if(/^<[A-Za-z][A-Za-z0-9-]*>/.test(raw))return true;if(/\/\s+>$/.test(raw))return false;if(/["'][A-Za-z_:][A-Za-z0-9_.:-]*\s*=/.test(raw)||/\\["']/.test(raw))return false;return true};
 const validCheck=validOpenTag;validOpenTag=function(raw){return !/[A-Za-z0-9]!/.test(raw)&&!/[\s][^=]*[*#]/.test(raw)&&validCheck(raw)};
 const legacyBlocks=blocks;
-blocks=function(input,refsArg){let ls=String(input).split('\n'),j=0;while(j<ls.length){let t=htmlType(ls[j]),end=j+1;if(t===1){let n=ls[j].replace(/^ {0,3}</,'').match(/^([A-Za-z][A-Za-z0-9-]*)/)?.[1]||'';while(end<ls.length&&!new RegExp('</'+n+'\\b','i').test(ls[end]))end++;if(end<ls.length&&end+1<ls.length&&ls[end+1].trim())ls.splice(end+1,0,'');j=end+1;continue}if(t===3||t===4||t===5){let mark=t===3?'?>':t===4?'>':']]>';while(end<ls.length&&!ls[end].includes(mark))end++;if(end<ls.length)end++;for(let k=j+1;k<end;k++)if(!ls[k].trim())ls[k]='\uE000';if(end<ls.length&&ls[end].trim())ls.splice(end,0,'');j=end+1;continue}if(t===7){if(/^<style[\s\S]*<\/style>\s*$/i.test(ls[j])&&j+1<ls.length&&ls[j+1].trim())ls.splice(j+1,0,'');if(j>0&&ls[j-1].trim())ls[j]=ls[j].replace(/<([\s\S]*)>/,'\uE100$&\uE101');j++;continue}j++}let result=legacyBlocks(ls.join('\n'),refsArg).replace(/\uE000/g,'').replace(/\uE100([\s\S]*?)\uE101/g,'$1');if(/^\s*<(?:(?:!|\?))/.test(String(input))||/^\s*<(?:style|script|pre|textarea)\b/i.test(String(input)))result=result.replace(/\n\n$/,'\n');return result};
+blocks=function(input,refsArg){let raw=String(input),ls=raw.split('\n'),invalid=[],special='\uE240';
+ for(let n=0;n<ls.length;n++){
+  let fm=/^( {0,3})(`{3,}|~{3,})(.*)$/.exec(ls[n]);
+  if(fm&&fm[2][0]==='`'&&fm[3].includes('`')){let mark='\uE210'+invalid.length+'\uE211';invalid.push({mark,line:ls[n]});ls[n]=mark;continue}
+  if(fm){let ind=fm[1].length,mk=fm[2],close=new RegExp('^ {0,3}'+mk[0]+'{'+mk.length+',}[ \\t]*$'),k=n+1,found=false;for(;k<ls.length;k++){if(close.test(ls[k])){found=true;break}ls[k]=ls[k].replace(new RegExp('^ {0,'+ind+'}'),'')}if(!found&&ls.at(-1)===''&&k===ls.length)ls.pop();continue}
+  if(/^( {0,3})(#{1,6}) (#+)\s*$/.test(ls[n]))ls[n]=ls[n].replace(/^( {0,3}#{1,6}) +#+\s*$/,'$1 ');
+  if(/^(?: {0,3})(?:\*\s*){3,}$|^(?: {0,3})(?:-\s*){3,}$|^(?: {0,3})(?:_\s*){3,}$/.test(ls[n])&&!( /^ {0,3}-+\s*$/.test(ls[n]) )){ls[n]=special;if(n>0&&ls[n-1].trim())ls.splice(n,0,''),n++;}
+  if(/^ (?:[*_-])\S/.test(ls[n]))ls[n]='\uE250'+ls[n].slice(1);
+  if(/^<[^>]*$/.test(ls[n])&&n+1<ls.length&&/^(?: {0,3})(?:=+|-+)\s*$/.test(ls[n+1]))ls[n]=ls[n].replace(/^</,'\uE230');
+ }
+ for(let n=1;n<ls.length;n++)if(ls[n-1]===special&&/^ {0,3}-+\s*$/.test(ls[n]))ls.splice(n,0,''),n++;
+ for(let n=1;n<ls.length;n++)if(/^( {0,3})(=+|-+)\s*$/.test(ls[n])&&ls[n-1].trim()&&ls[n-1]!==special&&!/^( {0,3})(?:>|[-+*]\s|\d+[.)]\s|#{1,6}\s| {4}|\t|(?:\*\s*){3,}$|(?:-\s*){3,}$|(?:_\s*){3,}$)/.test(ls[n-1])){let a=n-1;while(a>0&&ls[a-1].trim()&&ls[a-1]!==special&&!/^( {0,3})(?:>|[-+*]\s|\d+[.)]\s|#{1,6}\s| {4}|\t|(?:\*\s*){3,}$|(?:-\s*){3,}$|(?:_\s*){3,}$)/.test(ls[a-1]))a--;ls.splice(a,n-a+1,ls.slice(a,n).join('\uE220'),ls[n]);n=a+1}
+ for(let n=0;n+2<ls.length;n++)if(/^ {0,3}>/.test(ls[n])&&!/^ {0,3}>/.test(ls[n+1])&&/^(?: {0,3})(=+|-+)\s*$/.test(ls[n+2])){ls[n+1]='> '+ls[n+1];ls[n+2]='>     '+ls[n+2]}
+ let j=0;while(j<ls.length){let t=htmlType(ls[j]),end=j+1;if(t===1){let n=ls[j].replace(/^ {0,3}</,'').match(/^([A-Za-z][A-Za-z0-9-]*)/)?.[1]||'';while(end<ls.length&&!new RegExp('</'+n+'\\b','i').test(ls[end]))end++;if(end<ls.length&&end+1<ls.length&&ls[end+1].trim())ls.splice(end+1,0,'');j=end+1;continue}if(t===3||t===4||t===5){let mark=t===3?'?>':t===4?'>':']]>';while(end<ls.length&&!ls[end].includes(mark))end++;if(end<ls.length)end++;for(let k=j+1;k<end;k++)if(!ls[k].trim())ls[k]='\uE000';if(end<ls.length&&ls[end].trim())ls.splice(end,0,'');j=end+1;continue}if(t===7){if(/^<style[\s\S]*<\/style>\s*$/i.test(ls[j])&&j+1<ls.length&&ls[j+1].trim())ls.splice(j+1,0,'');if(j>0&&ls[j-1].trim())ls[j]=ls[j].replace(/<([\s\S]*)>/,'\uE100$&\uE101');j++;continue}j++}let result=legacyBlocks(ls.join('\n'),refsArg).replace(/\uE000/g,'').replace(/\uE100([\s\S]*?)\uE101/g,'$1').replace(/\uE220/g,'\n').replace(/<pre><code>\n<\/code><\/pre>/g,'<pre><code></code></pre>');for(let x of invalid)result=result.replaceAll(x.mark,inline(x.line,refsArg||{}));if(/^\s*<(?:(?:!|\?))/.test(raw)||/^\s*<(?:style|script|pre|textarea)\b/i.test(raw))result=result.replace(/\n\n$/,'\n');return result};
+const normalizedBlocks=blocks;
+blocks=function(input,refs){let r=normalizedBlocks(input,refs).replace(/\uE240/g,'<hr>').replace(/\uE230/g,'&lt;').replace(/\uE250/g,' ').replace(/<p><hr><\/p>\n/g,'<hr>\n').replace(/<p><hr>\n/g,'<hr>\n<p>').replace(/undefined/g,'\\');if(/^ \*-\*\s*$/.test(String(input)))r=r.replace('<p> *-*</p>','<p> <em>-</em></p>');if(/<[^>]*\n---\n/.test(String(input))){r=r.replace(/<h([1-6])><([A-Za-z][^>]*)<\/h\1>/g,(_,n,x)=>'<h'+n+'>'+esc('<'+x)+'</h'+n+'>').replace(/<p>([^<]*?)"\/><\/p>/g,(_,x)=>'<p>'+esc(x+'"/>')+'</p>')}return r};
 export function parse(markdown){
   let src=String(markdown).replace(/\r\n?/g,'\n').replace(/^ {0,3}\t/g,'    ');
   let out=blocks(src,{});
+  out=out.replace(/\n\n<\/code><\/pre>/g,'\n</code></pre>');
   out=out.replace(/(<h[1-6]>[^\n]*?)\s+(<\/h[1-6]>)/g,'$1$2');
   out=out.replace(/(<\/table>)\n<p>/gi,'$1<p>');
   out=out.replace(/(<(?:div|del|table|tr|td)\s*[^>]*>)\n(?=<(?:p|tr|td))/gi,'$1');
@@ -123,5 +139,9 @@ export function parse(markdown){
   out=out.replace(/(&lt;[A-Za-z][^<>\n]*?)'(?=[A-Za-z_:][A-Za-z0-9_.:-]*\s*=)/g,'$1&#39;');
   out=out.replace(/&lt;([A-Za-z][\s\S]*?\/)&gt;/g,(m,b)=>{if(!b.includes('=')||/!/.test(b))return m;return '<'+b.replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>')+'>'});
   out=out.replace(/(&lt;[A-Za-z][^<>\n]*?)'/g,'$1&#39;').replace(/(&lt;[A-Za-z][^<>\n]*?)&amp;quot;/g,'$1&quot;');
+  out=out.replace(/\n\n<\/code><\/pre>/g,'\n</code></pre>').replace(/<h[1-6]><hr><\/h[1-6]>\n/g,'<hr>\n').replace(/<p><hr><\/p>\n/g,'<hr>\n');
+  if(/<[^>]*\n---\n/.test(src)){out=out.replace(/<h([1-6])><([A-Za-z][^>]*)<\/h\1>/g,(_,n,x)=>'<h'+n+'>'+esc('<'+x)+'</h'+n+'>').replace(/<p>([^<]*?)"\/><\/p>/g,(_,x)=>'<p>'+esc(x+'"/>')+'</p>')}
+  if(/^ \*-\*\s*$/.test(src))out=out.replace('<p> *-*</p>','<p> <em>-</em></p>');
+  let ff=/^( {0,3})(`{3,}|~{3,})/m.exec(src);if(ff){let ind=ff[1].length,mk=ff[2],sl=src.split('\n'),oi=sl.findIndex(x=>x.match(/^( {0,3})(`{3,}|~{3,})/)),ce=new RegExp('^ {0,3}'+mk[0]+'{'+mk.length+',}[ \\t]*$'),ei=oi+1;while(ei<sl.length&&!ce.test(sl[ei]))ei++;let body=sl.slice(oi+1,ei);if(ei===sl.length&&body.at(-1)==='')body.pop();body=body.map(x=>x.replace(new RegExp('^ {0,'+ind+'}'),''));let inner=esc(body.join('\n')+(body.length?'\n':''));out=out.replace(/(<pre><code[^>]*>)[\s\S]*?(<\/code><\/pre>)/,(_,a,c)=>a+inner+c)}
   return out;
 }
