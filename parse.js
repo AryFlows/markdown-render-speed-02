@@ -8,7 +8,7 @@ const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(
 const attr = s => String(s).replace(/&(?!(?:#(?:x[0-9a-f]+|[0-9]+)|[A-Za-z][A-Za-z0-9]+);)/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 // Percent-encode a URL attribute.
-const urlAttr = s => String(s).replace(/\\([!"#$%&'()*+,.\/:;<=>?@\[\\\]^_`{|}~])/g, '$1').replace(/[\\" <>\[\]]|[^\x21-\x7e]/g, c => encodeURIComponent(c));
+const urlAttr = (s, preserveBackslash = false) => String(s).replace(preserveBackslash ? /$^/ : /\\([!"#$%&'()*+,.\/:;<=>?@\[\\\]^_`{|}~])/g, '$1').replace(/[\\" <>\[\]`]|[^\x21-\x7e]/g, c => encodeURIComponent(c));
 
 // Escape text while decoding numeric entities.
 function text(s) {
@@ -130,7 +130,7 @@ function unesc(s) { return s.replace(/\\([!"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~])
 
 // Match an autolink or bare URL.
 function matchAutolink(src, i) {
-  const enc = s => urlAttr(s).replace(/\\/g, '%5C');
+  const enc = s => urlAttr(s, true);
   const result = (href, label, len) => ({ html: `<a href="${enc(href)}">${text(label)}</a>`, len });
   const email = value => {
     const at = value.lastIndexOf('@');
@@ -257,6 +257,9 @@ function inlineLegacy(src, refs) {
         i = close + count;
         continue;
       }
+      i += count;
+      plain += '`'.repeat(count);
+      continue;
     }
     if (src[i] === '<') {
       let match = /^<([A-Za-z][A-Za-z0-9+.-]*:\/\/[^ <>]+)>/i.exec(src.slice(i));
@@ -517,6 +520,29 @@ function inline(src, refs) {
     if (/^<\//.test(raw) ? /^<\/[A-Za-z][A-Za-z0-9-]*\s*>$/.test(raw) : validOpenTag(raw)) return raw;
     return esc(raw);
   });
+  const codeValues = [];
+  let codeProtected = '';
+  for (let i = 0; i < source.length;) {
+    if (source[i] !== '`') { codeProtected += source[i++]; continue; }
+    let endRun = i + 1;
+    while (source[endRun] === '`') endRun++;
+    const count = endRun - i;
+    let close = -1;
+    for (let p = endRun; p < source.length;) {
+      if (source[p] !== '`') { p++; continue; }
+      let q = p + 1;
+      while (source[q] === '`') q++;
+      if (q - p === count) { close = p; break; }
+      p = q;
+    }
+    if (close < 0) { codeProtected += source.slice(i, endRun); i = endRun; continue; }
+    let value = source.slice(endRun, close).replace(/\r\n?|\n/g, ' ').replace(/\t/g, ' ');
+    if (value[0] === ' ' && value.at(-1) === ' ' && value.trim()) value = value.slice(1, -1);
+    codeProtected += '\uE100' + codeValues.length + '\uE101';
+    codeValues.push('<code>' + esc(value) + '</code>');
+    i = close + count;
+  }
+  source = codeProtected;
   let masked = source.replace(/<[A-Za-z][\s\S]*?\/>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>|<![A-Za-z][\s\S]*?>|<\/?[A-Za-z][\s\S]*?>/g, (raw, offset, whole) => {
     if (offset > 0 && whole[offset - 1] === '\\') return raw;
     let valid = false;
@@ -535,7 +561,7 @@ function inline(src, refs) {
     return key;
   });
   const output = inlineLegacy(masked, refs);
-  return output.replace(/\uE000(\d+)\uE001/g, (_, n) => values[+n]);
+  return output.replace(/\uE000(\d+)\uE001/g, (_, n) => values[+n]).replace(/\uE100(\d+)\uE101/g, (_, n) => codeValues[+n]);
 }
 
 const blockTags = 'address article aside base basefont blockquote body caption center col colgroup dd details dialog dir div dl dt fieldset figcaption figure footer form frame frameset h1 h2 h3 h4 h5 h6 head header hr html iframe legend li link main menu menuitem meta nav noframes ol optgroup option p param section source summary table tbody td tfoot th thead title tr track ul';
@@ -864,7 +890,7 @@ function blocks(input, refsArg) {
       i++;
       while (i < lines.length && !new RegExp('^ {0,3}' + mark[0] + '{' + mark.length + ',}\\s*$').test(lines[i])) body.push(lines[i++]);
       if (i < lines.length) i++;
-      const language = info.split(/[ \t]+/)[0];
+      const language = unesc(info.split(/[ \t]+/)[0]);
       output += '<pre><code' + (language ? ' class="language-' + attr(language) + '"' : '') + '>' + esc(body.join('\n')) + (body.length ? '\n' : '') + '</code></pre>\n';
       continue;
     }
