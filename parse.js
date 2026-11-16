@@ -791,7 +791,28 @@ export function parse(markdown) {
 
 // Parse block-level markdown into marked-compatible HTML.
 function blocks(input, refsArg) {
-  const collected = collectRefs(input.split('\n'));
+  const sourceLines = input.split('\n');
+  const expandTabs = (value, column) => {
+    let result = '';
+    for (const char of value) {
+      if (char === '\t') {
+        const count = 4 - (column % 4);
+        result += ' '.repeat(count);
+        column += count;
+      } else {
+        result += char;
+        column++;
+      }
+    }
+    return result;
+  };
+  const structuralLines = sourceLines.map(line => {
+    const prefix = /^(?:[ \t]*>+[ \t]*|[ \t]*[-+*]|[ \t]*\d+[.)])/.exec(line);
+    if (prefix) return expandTabs(prefix[0], 0) + line.slice(prefix[0].length);
+    const indent = /^[ \t]*/.exec(line)[0];
+    return expandTabs(indent, 0) + line.slice(indent.length);
+  });
+  const collected = collectRefs(structuralLines);
   const refs = Object.assign(refsArg || {}, collected.refs);
   const lines = collected.lines;
   let output = '';
@@ -951,8 +972,25 @@ function blocks(input, refsArg) {
     }
     const listMatch = /^( *)([-+*]|\d+[.)])(?:[ \t]+.*|$)/.exec(line);
     if (listMatch) { list(line, /^\d/.test(listMatch[2])); continue; }
-    if (line.includes('|') && i + 1 < lines.length && /^\s*\|?\s*:?-{1,}:?\s*(?:\|\s*:?-{1,}:?\s*)+\|?\s*$/.test(lines[i + 1])) {
-      const cells = value => value.trim().replace(/^\||\|$/g, '').split('|').map(cell => cell.trim().replace(/\\\|/g, '|'));
+    const splitCells = value => {
+      const source = value.trim().replace(/^\|/, '').replace(/\|$/, '');
+      const cells = [];
+      let cell = '';
+      for (let p = 0; p < source.length; p++) {
+        if (source[p] === '|' && (p === 0 || source[p - 1] !== '\\')) {
+          cells.push(cell.trim());
+          cell = '';
+        } else cell += source[p];
+      }
+      cells.push(cell.trim());
+      return cells;
+    };
+    const dividerPattern = value => {
+      const parts = splitCells(value);
+      return parts.length > 0 && parts.every(cell => /^:?-{1,}:?$/.test(cell));
+    };
+    if (line.includes('|') && i + 1 < lines.length && lines[i + 1].includes('|') && dividerPattern(lines[i + 1])) {
+      const cells = splitCells;
       const header = cells(line);
       const divider = cells(lines[i + 1]);
       output += '<table>\n<thead>\n<tr>\n';
@@ -961,11 +999,16 @@ function blocks(input, refsArg) {
         const align = definition.startsWith(':') && definition.endsWith(':') ? 'center' : definition.startsWith(':') ? 'left' : definition.endsWith(':') ? 'right' : '';
         output += '<th' + (align ? ' align="' + align + '"' : '') + '>' + inline(header[n], refs) + '</th>\n';
       }
-      output += '</tr>\n</thead>\n<tbody>';
+      output += '</tr>\n</thead>\n';
       i += 2;
-      while (i < lines.length && lines[i].includes('|')) {
+      const body = [];
+      while (i < lines.length && lines[i].trim() && !interruptsParagraph(lines[i], false) && !/^ {0,3}>/.test(lines[i])) {
+        body.push(lines[i++]);
+      }
+      if (body.length) output += '<tbody>';
+      for (const bodyLine of body) {
         output += '<tr>\n';
-        const row = cells(lines[i++]);
+        const row = cells(bodyLine);
         for (let n = 0; n < header.length; n++) {
           const definition = divider[n] || '';
           const align = definition.startsWith(':') && definition.endsWith(':') ? 'center' : definition.startsWith(':') ? 'left' : definition.endsWith(':') ? 'right' : '';
@@ -973,7 +1016,8 @@ function blocks(input, refsArg) {
         }
         output += '</tr>\n';
       }
-      output += '</tbody></table>\n';
+      if (body.length) output += '</tbody>';
+      output += '</table>\n';
       continue;
     }
     const paragraph = [line];
