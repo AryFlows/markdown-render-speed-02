@@ -25,12 +25,12 @@ function text(s) {
           continue;
         }
         let code = value[1].toLowerCase() === 'x' ? parseInt(value.slice(2), 16) : +value.slice(1);
-        if (code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) {
+        if (code > 0x10ffff) {
           out += '&amp;' + value + ';';
           i += match[0].length;
           continue;
         }
-        out += code === 34 ? '&quot;' : String.fromCodePoint(code);
+        out += code === 0 || (code >= 0xd800 && code <= 0xdfff) ? '\uFFFD' : code === 34 ? '&quot;' : String.fromCodePoint(code);
         i += match[0].length;
         continue;
       }
