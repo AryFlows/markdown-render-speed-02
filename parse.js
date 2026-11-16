@@ -781,6 +781,12 @@ function blocks(input, refsArg) {
     const content = empty ? match[1].length + width + 1 : match[1].length + width + (spaces >= 5 ? 1 : spaces ? spaces : 1);
     return { indent: match[1].length, mark: match[2], ordered: !!match[3], number: match[3], content, body: rest.slice(empty ? rest.length : spaces >= 5 ? 1 : spaces), empty };
   };
+  const interruptsParagraph = (source, hasParagraph = true) => {
+    return !!fence(source) || /^ {0,3}#{1,6}(?:\s|$)/.test(source) ||
+      /^ {0,3}(?:\*\s*){3,}$|^ {0,3}(?:-\s*){3,}$|^ {0,3}(?:_\s*){3,}$/.test(source) ||
+      htmlStart(source) || !!marker(source) ||
+      (hasParagraph && /^ {0,3}(?:=+|-+)\s*$/.test(source));
+  };
 
   // Parse a contiguous list.
   function list(first, ordered) {
@@ -811,7 +817,9 @@ function blocks(input, refsArg) {
         if (!current.trim()) { itemLines.push(''); hadBlank = true; i++; continue; }
         if (indent >= content) { itemLines.push(current.slice(content)); i++; continue; }
         if (hadBlank) { i--; break; }
-        break;
+        if (interruptsParagraph(current)) break;
+        itemLines.push(current.replace(/^ {1,4}/, ''));
+        i++;
       }
       let end = itemLines.length;
       while (end && !itemLines[end - 1].trim()) end--;
@@ -883,8 +891,12 @@ function blocks(input, refsArg) {
     if (/^ {0,3}>/.test(line)) {
       const body = [];
       while (i < lines.length) {
-        if (/^ {0,3}>/.test(lines[i])) body.push(lines[i++].replace(/^ {0,3}> ?/, ''));
-        else if (!lines[i].trim()) { body.push(''); i++; }
+        if (!lines[i].trim()) break;
+        if (/^ {0,3}>/.test(lines[i])) {
+          const quoted = lines[i++].replace(/^ {0,3}>/, '');
+          body.push(quoted.startsWith(' ') ? quoted.slice(1) : quoted);
+        } else if (!interruptsParagraph(lines[i]) && !fence(lines[i]) && !/^ {4}/.test(lines[i])) body.push(lines[i++]);
+        else if (!interruptsParagraph(lines[i]) && /^ {4}/.test(lines[i]) && body.length && body.at(-1).trim()) body.push(lines[i++].slice(4));
         else break;
       }
       output += '<blockquote>\n' + blocks(body.join('\n'), refs) + '</blockquote>\n';
@@ -940,7 +952,7 @@ function blocks(input, refsArg) {
     }
     const paragraph = [line];
     i++;
-    while (i < lines.length && lines[i].trim() && !fence(lines[i]) && !/^ {0,3}(?:>|#{1,6}\s|[-+*]\s|\d+[.)]\s)/.test(lines[i]) && !htmlStart(lines[i]) && !(i + 1 < lines.length && /^ {0,3}(?:=+|-+)\s*$/.test(lines[i + 1]))) {
+    while (i < lines.length && lines[i].trim() && !/^ {0,3}>/.test(lines[i]) && !interruptsParagraph(lines[i]) && !(i + 1 < lines.length && /^ {0,3}(?:=+|-+)\s*$/.test(lines[i + 1]))) {
       paragraph.push(lines[i++]);
     }
     output += '<p>' + inline(paragraph.join('\n'), refs) + '</p>\n';
