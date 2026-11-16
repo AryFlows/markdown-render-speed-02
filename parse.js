@@ -25,7 +25,11 @@ function text(s) {
           continue;
         }
         let code = value[1].toLowerCase() === 'x' ? parseInt(value.slice(2), 16) : +value.slice(1);
-        if (code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) code = 0xfffd;
+        if (code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) {
+          out += '&amp;' + value + ';';
+          i += match[0].length;
+          continue;
+        }
         out += code === 34 ? '&quot;' : String.fromCodePoint(code);
         i += match[0].length;
         continue;
@@ -33,7 +37,7 @@ function text(s) {
     }
     let end = i + 1;
     while (end < s.length && s[end] !== '&') end++;
-    out += esc(s.slice(i, end));
+    out += esc(s.slice(i, end)).replace(/&amp;([A-Za-z0-9]+;)/g, '&$1');
     i = end;
   }
   return out;
@@ -53,7 +57,7 @@ function splitDest(s) {
 }
 
 // Normalize a reference label.
-const normLabel = s => s.trim().replace(/\s+/g, ' ').toLowerCase().replace(/ß/g, 'ss');
+const normLabel = s => unesc(s).trim().replace(/\s+/g, ' ').toLowerCase().replace(/ß/g, 'ss');
 
 // Scan a bracketed label, respecting nested constructs.
 function scanLabel(s, start) {
@@ -390,7 +394,7 @@ function inlineLegacy(src, refs, codeValues = []) {
       let end = i + 1;
       while (src[end] === character) end++;
       const count = end - i;
-      if (character !== '~' || count === 2) {
+      if (character !== '~' || count === 1 || count === 2) {
         flush();
         const before = i ? Array.from(src.slice(0, i)).at(-1) : ' ';
         const after = end < src.length ? Array.from(src.slice(end))[0] : ' ';
